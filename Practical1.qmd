@@ -1,0 +1,123 @@
+---
+title: "Practical1"
+format: html
+---
+
+```{r}
+library(tidyverse)
+library(gridExtra)
+library(fields)
+library(asbio)
+```
+
+```{r}
+d <- read_csv("EIA.csv")
+
+d <- d |>
+  mutate(tidestate = as.factor(tidestate),
+         density = count/area)
+```
+
+```{r}
+# first group the data by gridcodes and find the mean density for each cell
+newdata <- group_by(d, GridCode) |>
+  summarise(x.pos = first(x.pos), 
+            y.pos = first(y.pos), 
+            area = first(area), 
+            density = mean(density))
+
+# pick a nice colour scheme
+col <- colorRampPalette(rev(rgb(c(231,117,27), 
+                                c(41,112,158), 
+                                c(138,179,119), 
+                                max = 255)))(100)
+
+# plot the data
+p <- ggplot(newdata)
+p <- p + 
+  geom_tile(aes(x = x.pos, y = y.pos, fill = density, 
+                height = 1000, width = 1000)) + 
+  scale_fill_gradientn(colours = col, space = "Lab", 
+                       na.value = "grey50", guide = "colourbar")
+p + theme_bw() + coord_equal()
+```
+
+Checking linearity:
+
+exploratory plots
+
+```{r}
+d |>
+  ggplot(aes(x = density)) +
+  geom_histogram(binwidth = 5) +
+  facet_grid(~ tidestate) +
+  theme_bw() +
+  labs(x = "Tide State", y = "Density")
+
+d |>
+  ggplot(aes(y = density, x = observationhour)) +
+  geom_point() +
+  theme_bw() +
+  labs(x = "Observation Hour", y = "Density") +
+  scale_x_continuous(breaks = seq(0, 24, 1))
+
+d |>
+  ggplot(aes(y = density, x = DayOfMonth)) +
+  geom_point() +
+  theme_bw() +
+  labs(x = "Day of Month", y = "Density") +
+  scale_x_continuous(breaks = seq(1, 31, 3))
+
+d |>
+  ggplot(aes(y = density, x = MonthOfYear)) +
+  geom_point() +
+  theme_bw() +
+  labs(x = "Month of Year", y = "Density") +
+  scale_x_continuous(breaks = seq(1, 12, 1))
+
+d |>
+  ggplot(aes(x = density)) +
+  geom_histogram(binwidth = 5) +
+  facet_grid(~ impact) +
+  theme_bw() +
+  labs(x = "Impact", y = "Density")
+
+d |>
+  ggplot(aes(y = density, x = Year)) +
+  geom_point() +
+  theme_bw() +
+  labs(x = "Year", y = "Density") 
+
+d |>
+  ggplot(aes(y = density, x = x.pos)) +
+  geom_point() +
+  theme_bw() +
+  labs(x = "X Coordinate", y = "Density")
+
+d |>
+  ggplot(aes(y = density, x = y.pos)) +
+  geom_point() +
+  theme_bw() +
+  labs(x = "Y Coordinate", y = "Density")
+```
+
+```{r}
+workingModel <- 
+  lm(density ~ x.pos + y.pos + tidestate +
+       Year + DayOfMonth + MonthOfYear, data = d)
+
+par(mfrow=c(3,2))
+
+termplot(workingModel,se=T, partial.resid = T)
+```
+
+
+
+
+
+
+
+
+
+
+
