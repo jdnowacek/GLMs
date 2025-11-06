@@ -118,7 +118,8 @@ exploratory plots
 
 ```{r}
 # month as continuous
-fit.full <- lm(density ~ tidestate + observationhour + DayOfMonth + MonthOfYear + impact + Year + x.pos + y.pos, data = EIA)
+fit.full <- lm(density ~ tidestate + observationhour + DayOfMonth + MonthOfYear + impact + Year + x.pos + y.pos, 
+               data = EIA)
 summary(fit.full)
 AIC(fit.full)
 
@@ -152,26 +153,221 @@ step(fit.interac, direction = "both")
 
 ```{r}
 n <- nrow(EIA)
-step(fit.interac, direction = "both", k = log(n))
-
-
+step(fit.interac, direction = "both")
 ```
 
 ```{r}
-AIC_selected_mod <- lm(density ~ observationhour + Year + x.pos + y.pos, data = EIA)
-summary(AIC_selected_mod)
+AIC_selected_mod <- lm(density ~ tidestate + observationhour + as.factor(MonthOfYear) + Year + x.pos + y.pos + Year:x.pos, data = EIA)
 
-str(summary(AIC_selected_mod))
+summary <- summary(AIC_selected_mod)
 
-sum((fitted(AIC_selected_mod) - EIA$density)^2) / 27793
+# str(summary(AIC_selected_mod))
+
+sum((fitted(AIC_selected_mod) - EIA$density)^2) / 27779
+
+summary$sigma^2
 ```
 
 
 ```{r}
-Anova()
+# Anova()
+```
+
+GLS
+
+```{r, message=F}
+library(nlme)
+
+EIA$sqrtdensity <- sqrt(EIA$density)
+
+fit.gls <- gls(sqrtdensity ~ tidestate + observationhour + impact + x.pos + y.pos + MonthOfYear + impact:x.pos + impact:y.pos, data = EIA, method = 'ML')
+```
+
+```{r}
+# plot(fitted(fit.gls.exp), residuals(fit.gls.exp, type = 'response'))
+# 
+# cut.fit <- cut(fitted(fit.gls.exp), breaks = quantile(fitted(fit.gls.exp), probs = seq(0, 1, length = 20)))
+# means1 <- tapply(fitted(fit.gls.exp), cut.fit, mean)
+```
+
+```{r}
+# workingModel_GLS<- gls(sqrt(density) ~
+#                          tidestate + observationhour + impact + x.pos + y.pos +
+#                          MonthOfYear + impact:x.pos + impact:y.pos,
+#                        data = EIA, weights=varExp(), method="ML")
+# 
+# cut.fit <- cut(
+#   fitted(workingModel_GLS), 
+#   breaks = quantile(fitted(workingModel_GLS), 
+#   probs = seq(0, 1, length = 20))
+# )
 ```
 
 
+```{r}
+EIA$sqrtdensity <- sqrt(EIA$density)
+fit.gls.exp <- gls(sqrtdensity ~ tidestate + observationhour + impact + x.pos + y.pos + MonthOfYear + impact:x.pos + impact:y.pos, 
+                   data = EIA, 
+                   method = 'ML', 
+                   weights = varExp()
+                )
+# plot(fit.gls.exp)
+# plot(fitted(fit.gls.exp), residuals(fit.gls.exp, type = 'response'))
+
+cut.fit <- cut(
+  fitted(fit.gls.exp), 
+  breaks = quantile(fitted(fit.gls.exp), 
+  probs = seq(0, 1, length = 20))
+)
+means1 <- tapply(fitted(fit.gls.exp), cut.fit, mean)
+
+vars1 <- tapply(residuals(fit.gls.exp, type = "response"), cut.fit, var)
+
+fitted1 <- (summary(fit.gls.exp)$sigma^2) * exp(2*coef(fit.gls.exp$model) * means1)
+
+df1<-data.frame(means1,vars1,fitted1)
+
+colnames(df1)=c("Means","Vars","Fitted")
+
+
+ggplot(df1, aes(x=Means, y=Vars)) +
+  geom_point() +
+  geom_line(aes(Means,Fitted),color="blue") + 
+  theme_bw() +
+  xlab("Fitted Values") + ylab("Variance of Residuals") 
+
+ggsave()
+  
+```
+
+# last section
+
+```{r}
+par(mfrow = c(1,2))
+acf(residuals(fit.gls.exp, type = 'response'))
+acf(residuals(fit.gls.exp, type = 'normalized'))
+par(mfrow = c(1,1))
+```
+```{r}
+EIA$block <- paste(EIA$Year, EIA$MonthOfYear, EIA$DayOfMonth, EIA$GridCode, sep = '')
+library(dplyr)
+EIA2 <- arrange(EIA, block, Year, MonthOfYear, DayOfMonth, GridCode)
+```
+
+```{r}
+fit.gls.AR1 <- gls(sqrtdensity ~ 
+                    tidestate + observationhour + impact + x.pos + y.pos + 
+                    MonthOfYear + impact:x.pos + impact:y.pos, 
+                    data = EIA2, 
+                    method = 'ML', 
+                    weights = varExp(),
+                    correlation = corAR1(form = ~ 1 | block))
+                   
+```
+
+```{r}
+fit.gls.AR2 <- gls(sqrtdensity ~ 
+                    tidestate + observationhour + impact + x.pos + y.pos + 
+                    MonthOfYear + impact:x.pos + impact:y.pos, 
+                    data = EIA2, 
+                    method = 'ML', 
+                    weights = varExp(),
+                    correlation = corARMA(p = 2, q = 0, form = ~ 1 | block))
+```
+
+```{r}
+AIC(fit.gls.AR1)
+
+AIC(fit.gls.AR2)
+
+acf(residuals(fit.gls.AR1, type = 'response'))
+acf(residuals(fit.gls.AR1, type = 'normalized'))
+
+acf(residuals(fit.gls.AR2, type = 'response'))
+acf(residuals(fit.gls.AR2, type = 'normalized'))
+```
+
+```{r}
+# Full Model
+full_model <- fit.gls.AR2
+
+anova(full_model)
+
+# Model 1: Remove the least significant term (e.g., impact:y.pos)
+model_1 <- gls(sqrtdensity ~ tidestate + observationhour + impact + x.pos + y.pos + 
+                 MonthOfYear + impact:x.pos, 
+               data = EIA2, 
+               method = 'ML', 
+               weights = varExp(),
+               correlation = corARMA(p = 2, q = 0, form = ~ 1 | block))
+
+anova(full_model, model_1)
+```
+
+```{r}
+model_2 <- gls(sqrtdensity ~ tidestate + observationhour + impact + x.pos + 
+                 MonthOfYear + impact:x.pos, 
+               data = EIA2, 
+               method = 'ML', 
+               weights = varExp(),
+               correlation = corARMA(p = 2, q = 0, form = ~ 1 | block))
+
+anova(model_2)
+
+anova(model_1, model_2)
+```
+
+```{r}
+model_3 <- gls(sqrtdensity ~ tidestate + observationhour + impact + x.pos + impact:x.pos, 
+               data = EIA2, 
+               method = 'ML', 
+               weights = varExp(),
+               correlation = corARMA(p = 2, q = 0, form = ~ 1 | block))
+
+anova(model_3)
+
+anova(model_2, model_3)
+```
+
+```{r}
+model_4 <- gls(sqrtdensity ~ tidestate + observationhour + impact + x.pos, 
+               data = EIA2, 
+               method = 'ML', 
+               weights = varExp(),
+               correlation = corARMA(p = 2, q = 0, form = ~ 1 | block))
+
+anova(model_4)
+
+anova(model_3, model_4)
+```
+
+```{r}
+# Create a data frame for prediction
+# Note: observationhour must be numeric, and tidestate must be a factor level
+predict_data <- data.frame(
+  tidestate = factor(c("SLACK", "SLACK"), levels = levels(EIA2$tidestate)),
+  observationhour = c(10, 10),
+  x.pos = c(1500, 1500),
+  impact = c(0, 1)
+)
+
+# Predict on the square-root scale
+sqrt_pred <- MuMIn:::predict.gls(model_4, newdata = predict_data)
+
+myprediction <- MuMIn:::predict.gls(model_4, newdata = predict_data, 
+                                    se.fit = TRUE, interval = "confidence", level = 0.95)
+```
+
+```{r}
+se1 <- 1.96*myprediction$se.fit[1]
+se2 <- 1.96*myprediction$se.fit[2]
+
+lower1 <- myprediction$fit[1] - se1
+upper1 <- myprediction$fit[1] + se1
+
+lower2 <- myprediction$fit[2] - se2
+upper2 <- myprediction$fit[2] + se2
+```
 
 
 
