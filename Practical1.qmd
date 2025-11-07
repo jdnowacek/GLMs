@@ -229,14 +229,17 @@ df1<-data.frame(means1,vars1,fitted1)
 
 colnames(df1)=c("Means","Vars","Fitted")
 
+```
 
+```{r}
 ggplot(df1, aes(x=Means, y=Vars)) +
   geom_point() +
   geom_line(aes(Means,Fitted),color="blue") + 
   theme_bw() +
-  xlab("Fitted Values") + ylab("Variance of Residuals") 
-
-ggsave()
+  labs(x = "Fitted Values", 
+       y = "Variance of Residuals", 
+       title = "Observed vs Expected Mean Variance Relationship",
+       caption = "Blue curve represents expected mean-variance relationship by the model, points represent observed mean-variance.")
   
 ```
 
@@ -348,7 +351,7 @@ predict_data <- data.frame(
   tidestate = factor(c("SLACK", "SLACK"), levels = levels(EIA2$tidestate)),
   observationhour = c(10, 10),
   x.pos = c(1500, 1500),
-  impact = c(0, 1)
+  impact = c(0, 0)
 )
 
 # Predict on the square-root scale
