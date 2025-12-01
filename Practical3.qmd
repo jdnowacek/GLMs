@@ -1,0 +1,139 @@
+---
+title: "Practical3"
+format: html
+---
+
+```{r, message=FALSE}
+library(tidyverse)
+library(gridExtra)
+library(fields)
+library(asbio)
+library(MuMIn)
+library(regclass)
+library(knitr)
+library(broom)
+library(knitr)
+library(car)
+```
+
+```{r, message=F}
+EIA <- read_csv('EIA.csv')
+
+EIA <- EIA |>
+  mutate(impact = as.factor(impact),
+         MonthOfYear = as.factor(MonthOfYear),
+         Year = as.factor(Year))
+```
+
+```{r}
+fit.pois.sqrt <- 
+  glm(count ~ tidestate + observationhour + DayOfMonth + MonthOfYear + 
+        Year + x.pos + y.pos + Year:x.pos + Year:y.pos, 
+      data = EIA, family = poisson(link = 'sqrt'))
+
+summary(fit.pois.sqrt)
+```
+
+```{r}
+fit.pois <- glm(count ~ tidestate + observationhour + DayOfMonth + MonthOfYear + 
+                  Year + x.pos + y.pos + Year:x.pos + Year:y.pos, 
+                data = EIA, family = poisson)
+
+summary(fit.pois)
+```
+
+```{r}
+fit.pois.offset <- glm(count ~ tidestate + observationhour + DayOfMonth + MonthOfYear + 
+                  Year + x.pos + y.pos + Year:x.pos + Year:y.pos, 
+                data = EIA, family = poisson, offset = log(area))
+
+summary(fit.pois.offset)
+VIF(fit.pois.offset)
+```
+
+```{r}
+AIC(fit.pois.sqrt)
+AIC(fit.pois)
+AIC(fit.pois.offset)
+```
+
+```{r}
+stepAIC.pois.offset <- step(fit.pois.offset, 
+                            trace = FALSE, 
+                            direction = "both")
+
+stepBIC.pois.offset <- step(fit.pois.offset,
+                            k = log(nrow(EIA)),
+                            trace = FALSE,
+                            direction = "both")
+
+stepAIC.pois.offset
+stepBIC.pois.offset
+```
+
+```{r}
+stepBIC.pois.offset.OD <- glm(count ~ tidestate + observationhour + MonthOfYear + 
+                  Year + x.pos + y.pos + Year:x.pos + Year:y.pos, 
+                data = EIA, family = quasipoisson, offset = log(area))
+```
+
+```{r}
+stepBIC.pois.offset.OD |>
+  tidy() |>
+  kable(digits = 3)
+
+stepBIC.pois.offset|>
+  tidy() |>
+  kable(digits = 3)
+```
+
+```{r}
+summary(stepBIC.pois.offset.OD)
+
+summary(stepBIC.pois.offset)
+```
+
+```{r}
+stepBIC.pois.offset.OD <- glm(count ~ tidestate + observationhour + MonthOfYear + 
+                  Year + x.pos + y.pos, 
+                data = EIA, family = quasipoisson)
+
+summary(stepBIC.pois.offset.OD)
+```
+
+```{r}
+residualPlots(stepBIC.pois.offset.OD, terms= ~ . )
+```
+
+```{r}
+EIA |>
+  mutate(
+    expected = predict(stepBIC.pois.offset.OD, newdata = EIA, type = "response")) |>
+  ggplot(aes(x = expected, y = count)) +
+  geom_point(alpha = 0.6) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed") +
+  theme_bw()
+```
+
+```{r}
+x <- predict(stepBIC.pois.offset.OD, newdata = EIA, type = "response")
+
+range(x)
+```
+
+```{r}
+EIA |>
+  mutate(
+    fitted = predict(stepBIC.pois.offset.OD, type = "response"),
+    resid = residuals(stepBIC.pois.offset.OD, type = "pearson")
+  ) |>
+  ggplot(aes(x = fitted, y = resid)) +
+  geom_point(alpha = 0.6) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  theme_bw()
+```
+
+
+
+
+

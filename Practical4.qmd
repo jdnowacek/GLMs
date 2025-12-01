@@ -1,0 +1,44 @@
+---
+title: "Practical4"
+format: pdf
+---
+
+```{r, message=F}
+library(tidyverse)
+```
+
+```{r, message=F}
+d <- read_csv("admissions.csv")
+```
+
+```{r}
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -10,9 +10,12 @@ library(fields)
 library(asbio)
 library(MuMIn)
 library(regclass)
+library(knitr)
 ```
 
 ```{r}
+df <- read.csv("NystedFarms.csv")
+
 EIA <- read_csv("EIA.csv")
 
 EIA <- EIA |>
@@ -132,7 +135,9 @@ VIF(fit.full.fac)
 
 ```{r}
 fit.fullfac.noyr <- update(fit.full.fac, .~. - Year)
+summary(fit.fullfac.noyr)
 fit.fullfac.noimp <- update(fit.full.fac, .~. - impact)
+summary(fit.fullfac.noimp)
 AIC(fit.full, fit.full.fac, fit.fullfac.noimp, fit.fullfac.noyr)
 ```
 
@@ -153,7 +158,7 @@ step(fit.interac, direction = "both")
 
 ```{r}
 n <- nrow(EIA)
-step(fit.interac, direction = "both")
+step(fit.interac, direction = "both", k = log(n))
 ```
 
 ```{r}
@@ -173,7 +178,7 @@ summary$sigma^2
 # Anova()
 ```
 
-GLS
+## GLS
 
 ```{r, message=F}
 library(nlme)
@@ -339,10 +344,51 @@ model_4 <- gls(sqrtdensity ~ tidestate + observationhour + impact + x.pos,
                weights = varExp(),
                correlation = corARMA(p = 2, q = 0, form = ~ 1 | block))
 
+# c <- model_4$coefficients
+# c
+# before_construction <- (c[1] + c[4]*mean(EIA$observationhour) + c[6]*mean(EIA$x.pos))^2
+# after_construction <- (c[1] + c[4]*mean(EIA$observationhour) + c[5] + c[6]*mean(EIA$x.pos))^2
+# 
+# d <- data.frame(
+#   'Before Construction'= unname(before_construction),
+#   'After Construction'= unname(after_construction)
+# )
+# 
+# kable(d, digits = 3)
+
+summary(model_4)
+
 anova(model_4)
 
 anova(model_3, model_4)
 ```
+
+```{r}
+pred_data <- data.frame(
+  tidestate = c("SLACK", "SLACK"),
+  observationhour = c(10, 10),
+  MonthOfYear = c(6, 6),
+  x.pos = c(1500, 1500),
+  y.pos = c(1000, 1000),
+  impact = c(0, 1)
+) |>
+  mutate(tidestate = factor(tidestate, levels = levels(EIA2$tidestate)))
+
+myprediction <- MuMIn:::predict.gls(model_4, newdata = pred_data, se.fit = TRUE)
+
+
+tbl <- tibble(
+  Construction = c("Before", "After"),
+  Estimate = myprediction$fit^2,
+  Lower_Bound = (myprediction$fit - 1.96 * myprediction$se.fit)^2,
+  Upper_Bound = (myprediction$fit + 1.96 * myprediction$se.fit)^2
+) |>
+  mutate(`95% Confidence Interval` = paste0("(", round(Lower_Bound, 3), ", ", round(Upper_Bound, 3), ")")) |>
+  select(Construction, Estimate, `95% Confidence Interval`)
+
+kable(tbl, digits = 3, align = "l")
+```
+
 
 ```{r}
 # Create a data frame for prediction
