@@ -5,21 +5,254 @@ format: pdf
 
 ```{r, message=F}
 library(tidyverse)
+library(VGAM)
+library(nnet)
+library(car)
+library(knitr)
 ```
 
 ```{r, message=F}
 d <- read_csv("admissions.csv")
+
+nrow(d)
+
+d <- d |>
+  mutate(admission = as.factor(admission),
+         age = as.factor(age))
+         # age80 = as.factor(age80),
+         # died = as.factor(died),
+         # white = as.factor(white),
+
+# d <- d |>
+#   filter(!provnum %in% c("32000", "32002", "32003"))
+        
+
+# d |>
+#   group_by(provnum) |>
+#   count(admission[admission == "Emergency"])
+
+# d <- d |>
+#   group_by(provnum) |>
+#   filter(n_distinct(admission) == n_distinct(d$admission)) |>
+#   ungroup()
+
+nrow(d)
+```
+
+
+
+```{r}
+d |>
+  mutate(provnum = as.factor(provnum)) |>
+  ggplot(aes(x = provnum, y = los, color = admission)) +
+  geom_point() +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 ```
 
 ```{r}
+d |>
+  pivot_longer(
+    cols = c(age80, white, died),
+    names_to = "variable",
+    values_to = "value"
+  ) |>
+  ggplot(aes(x = variable, fill = as.factor(value))) +
+  facet_grid(~ admission) +
+  geom_bar(position = "fill") +
+  # Use _d (discrete) for categories and _fill_ for bar colors
+  # scale_fill_viridis_d(option = "C") + 
+  labs(y = "Proportion", fill = "Outcome") +
+  scale_y_continuous(labels = scales::percent) +
+  theme_bw()
+```
 
+```{r}
+d |>
+  # Reorder provnum based on the 'value' to make the chart readable (sorted low to high)
+  ggplot(aes(x = as.factor(provnum), fill = admission)) +
+  geom_bar(position = "fill") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) +
+  scale_fill_viridis_d(option = "E") 
 ```
 
 
+```{r}
+# ref level is the third level
+d_vgam <- d |>
+  mutate(
+    admission = fct_relevel(admission,
+                            "Urgent",
+                            "Emergency",
+                            "Elective"))
+
+# mod_full_vgam <-
+#   vglm(admission ~ died + white + los + age + provnum,
+#        family = multinomial, dat = d_vgam)
+
+mod_trimmed_vgam <-
+  vglm(admission ~ died + white + los,
+       family = multinomial, dat = d_vgam)
+
+mod_null_vgam <-
+  vglm(admission ~ 1,
+       family = multinomial, dat = d_vgam)
+
+1-logLik(mod_trimmed_vgam)/logLik(mod_null_vgam)
+```
+
+```{r}
+summary(mod_trimmed_vgam)
+
+AIC(mod_null_vgam)
+BIC(mod_null_vgam)
+
+AIC(mod_trimmed_vgam)
+BIC(mod_trimmed_vgam)
+```
+
+```{r}
+# vglm.is<-vglm(cbind(no,neither,yes)~income+scottish,family=multinomial,dat=indyref)
+# vglm.null<-vglm(cbind(no,neither,yes)~1,family=multinomial,dat=indyref)
+1-logLik(mod_full_vgam)/logLik(mod_null_vgam)
+```
 
 
+This model ran into the issue of the hospital ID numbers having perfect separation as some levels have only one admission type
+
+```{r}
+# ref level is the first level
+d_nnet <- d |>
+  mutate(
+    admission = fct_relevel(admission,
+                            "Elective",
+                            "Urgent",
+                            "Emergency"))
+
+mod_full_nnet <-
+  multinom(admission ~ died + white + los + provnum,
+       data = d_nnet)
+
+summary(mod_full_nnet)
+```
 
 
+## model assessment
+
+```{r}
+df <- d |>
+  select(c(died, white, los))
+
+# phi_matrix <- cor(df, use = "pairwise.complete.obs")
+# print(phi_matrix)
+
+
+df_expanded <- model.matrix(~ . - 1, data = df, na.action = "na.pass")
+
+# Calculate unified matrix
+# This handles Phi (Bin/Bin), Point-Biserial (Bin/Int), and Pearson (Int/Int) simultaneously
+phi_matrix <- cor(df_expanded, use = "pairwise.complete.obs")
+
+as.data.frame(phi_matrix) |>
+  kable(digits = 2)
+```
+
+
+```{r}
+mn.is.resid<-residuals(mod_trimmed_vgam)
+mn.is.fitted<-fitted(mod_trimmed_vgam)
+mn.is.observed<-mn.is.fitted+mn.is.resid[,1]
+par(mfrow=c(1,3))
+for(i in 1:3){
+  plot(mn.is.fitted[,i],mn.is.observed[,i],main=colnames(mn.is.fitted)[i],xlab="fitted p",ylab="observed p")
+  abline(a=0,b=1)
+  lines(smooth.spline(mn.is.fitted[,i],mn.is.observed[,i],df=4),col="red",lty=2)
+}
+```
+
+```{r}
+# Get predictions (Fix: exclude obs_row_id from pivot)
+preds <- predict(mod_trimmed_vgam, type = "response") %>% 
+  as_tibble() %>% 
+  mutate(obs_row_id = row_number()) %>% 
+  pivot_longer(-obs_row_id, names_to = "level", values_to = "fitted_prob")
+
+# Extract actual outcomes
+actuals <- model.matrix(~ admission - 1, data = d_vgam) %>% 
+  as_tibble() %>% 
+  mutate(obs_row_id = row_number()) %>% 
+  pivot_longer(-obs_row_id, names_to = "level_col", values_to = "is_event") %>% 
+  mutate(level = str_remove(level_col, "admission")) %>% 
+  select(-level_col)
+
+# Combine, Bin, and Plot
+preds %>% 
+  left_join(actuals, by = c("obs_row_id", "level")) %>% 
+  mutate(bin = ntile(fitted_prob, 10)) %>% 
+  group_by(level, bin) %>% 
+  summarise(
+    mean_fitted = mean(fitted_prob),
+    mean_observed = mean(is_event),
+    .groups = "drop"
+  ) %>% 
+  ggplot(aes(x = mean_fitted, y = mean_observed)) +
+  geom_point() +
+  geom_line(color = "red", linetype = "dashed") +
+  geom_abline(slope = 1, intercept = 0, linetype = "dotted") +
+  facet_wrap(~level, scales = "free") +
+  labs(title = "Calibration Plot", x = "Predicted Probability", y = "Observed Proportion") +
+  theme_bw()
+```
+
+```{r}
+preds <- preds |>
+  group_by(obs_row_id) |>
+  # Returns the level corresponding to the highest probability for that observation
+  mutate(guess = level[which.max(fitted_prob)]) |>
+  ungroup() # Always good practice after grouping
+
+actuals <- actuals |>
+  group_by(obs_row_id) |>
+  mutate(real = level[which.max(is_event)]) |>
+  ungroup()
+```
+
+```{r}
+j <- preds %>% 
+  left_join(actuals, by = c("obs_row_id", "level")) 
+```
+
+```{r}
+# j |>
+#   group_by(guess) |>
+#   
+```
+
+
+```{r}
+# Isolate true and predicted results, then merge
+classification_data <- actuals |>
+  # Filter to get the true outcome (is_event == 1) and rename the column
+  filter(is_event == 1) |>
+  select(obs_row_id, Observed = level) |>
+  # Join with the predicted classification
+  inner_join(
+    preds |> select(obs_row_id, Predicted = guess) |> distinct(),
+    by = "obs_row_id"
+  )
+
+# Generate confusion matrix and format for display
+confusion_matrix <- classification_data |>
+  select(Observed, Predicted) |>
+  table() |>
+  as_tibble() |>
+  # Pivot to a wide format, prefixing the column headers
+  pivot_wider(names_from = Predicted, values_from = n, names_prefix = "Predicted_") |>
+  rename(True_Outcome = Observed)
+
+print(confusion_matrix)
+```
 
 
 
